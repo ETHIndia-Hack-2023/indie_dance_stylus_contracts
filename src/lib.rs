@@ -2,6 +2,8 @@
 #![cfg_attr(not(feature = "export-abi"), no_main)]
 extern crate alloc;
 
+mod erc20;
+
 /// Initializes a custom, global allocator for Rust programs compiled to WASM.
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
@@ -14,6 +16,7 @@ use stylus_sdk::{
     alloy_primitives::Address, alloy_primitives::U256, block, call::RawCall, contract,
     function_selector, msg, prelude::*,
 };
+use crate::erc20::{Erc20, Erc20Params};
 
 const OWNER: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
 const TOKEN: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
@@ -30,6 +33,14 @@ const DANCERS_TO_BUY: [(u32, u32, u32); LEVEL_NUMS] = [
     (4, 100, 200),
     (5, 5000, 10000),
 ];
+
+pub struct InDanceParams;
+
+impl Erc20Params for InDanceParams {
+    const NAME: &'static str = "Wrapped Ether Example";
+    const SYMBOL: &'static str = "WETH";
+    const DECIMALS: u8 = 18;
+}
 
 sol_storage! {
     pub struct Dancer {
@@ -49,11 +60,15 @@ sol_storage! {
         mapping(address => uint256) last_claimed;
         mapping(address => uint256) claims;
         mapping(address => uint256) tokens_per_minute;
+        #[borrow] // Allows erc20 to access Weth's storage and make calls
+        Erc20<InDanceParams> erc20;
 
     }
 }
 
+
 #[external]
+#[inherit(Erc20<InDanceParams>)]
 impl InDance {
     pub fn get_claimable(&self, user: Address) -> Result<U256, Vec<u8>> {
         let claim = self.claims.get(user);
@@ -103,14 +118,16 @@ impl InDance {
             .setter(user)
             .set(U256::from(block::timestamp()));
 
+        let total_claim = claim.add(claim_pending);
+
         // Minting tokens to user
-        let selector = function_selector!("transfer(address)");
-        let data = [&selector[..], &user.into_array()].concat();
+        let selector = function_selector!("mint(address,uint256)");
+        let data = [&selector[..], &user.into_array(), &total_claim.to_be_bytes::<32>()].concat();
         RawCall::new()
             .call(TOKEN, &data)
             .unwrap_or("Token transfer error".into());
 
-        Ok(claim.add(claim_pending))
+        Ok(total_claim)
     }
 
     pub fn get_dance_floor(
