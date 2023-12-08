@@ -19,7 +19,6 @@ use stylus_sdk::{
 use crate::erc20::{Erc20, Erc20Params};
 
 const OWNER: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
-const TOKEN: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
 
 const LEVEL_NUMS: usize = 5;
 
@@ -120,12 +119,7 @@ impl InDance {
 
         let total_claim = claim.add(claim_pending);
 
-        // Minting tokens to user
-        let selector = function_selector!("mint(address,uint256)");
-        let data = [&selector[..], &user.into_array(), &total_claim.to_be_bytes::<32>()].concat();
-        RawCall::new()
-            .call(TOKEN, &data)
-            .unwrap_or("Token transfer error".into());
+        self.erc20.mint(user, total_claim);
 
         Ok(total_claim)
     }
@@ -160,18 +154,9 @@ impl InDance {
             .checked_mul(U256::from(10).pow(U256::from(18)))
             .ok_or("Overflow")
             .unwrap();
-        // Receiving tokens to contract
-        let selector = function_selector!("transferFrom(address,address,uint256)");
-        let data = [
-            &selector[..],
-            &msg::sender().into_array(),
-            &contract::address().into_array(),
-            &price.to_be_bytes::<32>(),
-        ]
-        .concat();
-        RawCall::new()
-            .call(TOKEN, &data)
-            .unwrap_or("Token transfer error".into());
+
+        // Receveing tokens from user
+        self.erc20.burn(msg::sender(), price).err().ok_or("Not ehough balance").unwrap();
 
         let last_floor_id = self.last_floor_ids.get(msg::sender());
 
@@ -234,17 +219,8 @@ impl InDance {
             .ok_or("Overflow")
             .unwrap();
 
-        let selector = function_selector!("transferFrom(address,address,uint256)");
-        let data = [
-            &selector[..],
-            &msg::sender().into_array(),
-            &contract::address().into_array(),
-            &price.to_be_bytes::<32>(),
-        ]
-        .concat();
-        RawCall::new()
-            .call(TOKEN, &data)
-            .unwrap_or("Token transfer error".into());
+        // Receveing tokens from user
+        self.erc20.burn(msg::sender(), price).err().ok_or("Not enough balance").unwrap();
 
         let last_floor_id = self.last_floor_ids.get(msg::sender());
 
