@@ -23,15 +23,15 @@ const OWNER: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
 const LEVEL_NUMS: usize = 5;
 
 const FLOOR_PRICE: usize = 100;
-const INITIAL_TOKEN_DROP: usize = 5;
+const INITIAL_TOKEN_DROP: usize = 10;
 
-// Level - coins_per_minute - price
+// Level - coins_per_second - price
 const DANCERS_TO_BUY: [(u32, u32, u32); LEVEL_NUMS] = [
-    (1, 2, 5),
-    (2, 5, 15),
-    (3, 10, 25),
-    (4, 100, 200),
-    (5, 5000, 10000),
+    (1, 1, 10),
+    (2, 5, 600),
+    (3, 7, 9000),
+    (4, 20, 19000),
+    (5, 30, 30000),
 ];
 
 pub struct InDanceParams;
