@@ -145,8 +145,12 @@ impl InDance {
     pub fn buy_dancer(&mut self, level: U256) -> Result<(), Vec<u8>> {
         self._claim(msg::sender())?;
 
+        if level.eq(&U256::ZERO) {
+            return Err("ZLVL".into());
+        }
+
         let (level, coins_per_minute, price): (u32, u32, u32) =
-            DANCERS_TO_BUY[level.byte(0) as usize];
+            DANCERS_TO_BUY[(level.byte(0) as usize) - 1];
 
         // price = price * 10 ** 18
         let price = U256::from(price)
