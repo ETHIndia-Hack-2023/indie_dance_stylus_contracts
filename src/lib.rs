@@ -23,6 +23,7 @@ const OWNER: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
 const LEVEL_NUMS: usize = 5;
 
 const FLOOR_PRICE: usize = 100;
+const INITIAL_TOKEN_DROP: usize = 5;
 
 // Level - coins_per_minute - price
 const DANCERS_TO_BUY: [(u32, u32, u32); LEVEL_NUMS] = [
@@ -105,7 +106,7 @@ impl InDance {
     pub fn get_game_data(&self, user: Address) -> Result<[(U256, U256); 10], Vec<u8>>{
         let mut result: [(U256, U256); 10] = [(U256::ZERO, U256::ZERO); 10];
 
-        let last_floor_id = self.floors_num.get(msg::sender()).checked_sub(U256::from(1)).ok_or("NOFL")?;
+        let last_floor_id = self.floors_num.get(user).checked_sub(U256::from(1)).ok_or("NOFL")?;
 
         let last_floor = self.get_dance_floor(user, last_floor_id).ok().ok_or("NGLF")?;
 
@@ -116,7 +117,7 @@ impl InDance {
         let balance = self.erc20.balance_of(user).ok().ok_or("NB")?;
         let claimable = self.get_claimable(user).ok().ok_or("NC")?;
 
-        let user_tokens_per_minute = self.tokens_per_minute.get(msg::sender());
+        let user_tokens_per_minute = self.tokens_per_minute.get(user);
 
         result[9] = (balance.add(claimable), user_tokens_per_minute);
 
@@ -250,7 +251,7 @@ impl InDance {
         let floors_num = self.floors_num.get(msg::sender());
 
         // Only first floor is free
-        if floors_num.gt(&U256::ZERO) {
+        if floors_num.gt(&U256::ZERO) { 
             let price = U256::from(FLOOR_PRICE)
                 .checked_mul(U256::from(10).pow(U256::from(18)))
                 .ok_or("OVF")?;
@@ -258,7 +259,7 @@ impl InDance {
             let balance = self.erc20.balance_of(msg::sender()).ok().ok_or("BLE")?;
 
             if balance.lt(&price) {
-                return Err("NOMO".into());
+                return Err("NOMO".into()); // this
             }
     
             // Receveing tokens from user
@@ -289,6 +290,11 @@ impl InDance {
                 // Last floor should be full to buy a new one
                 return Err("NOTF".into());
             }
+        } else {
+            // Minting user initial bonus tokens
+            self.erc20.mint(msg::sender(), U256::from(INITIAL_TOKEN_DROP)
+            .checked_mul(U256::from(10).pow(U256::from(18)))
+            .ok_or("OVF")?);
         }
 
         // Updating last floor id
