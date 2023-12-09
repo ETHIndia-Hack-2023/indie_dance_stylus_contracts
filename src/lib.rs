@@ -8,7 +8,7 @@ mod erc20;
 #[global_allocator]
 static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
 
-use std::ops::{Add, AddAssign, Mul};
+use std::ops::{Add, AddAssign, Mul, Sub};
 
 use crate::erc20::{Erc20, Erc20Params};
 use alloy_primitives::address;
@@ -55,7 +55,7 @@ sol_storage! {
     #[entrypoint]
     pub struct InDance {
         mapping(address => DanceFloor[]) floors;
-        mapping(address => uint256) last_floor_ids;
+        mapping(address => uint256) floors_num;
         mapping(address => uint256) last_claimed;
         mapping(address => uint256) claims;
         mapping(address => uint256) tokens_per_minute;
@@ -77,8 +77,8 @@ impl InDance {
         }
         {
             let user_tokens_per_minute = self.tokens_per_minute.get(user);
-            let time_diff = (U256::from(block::timestamp()).checked_sub(last_claimed_time))
-                .ok_or("IBT1")?;
+            let time_diff =
+                (U256::from(block::timestamp()).checked_sub(last_claimed_time)).ok_or("IBT1")?;
 
             claim_pending.add_assign(time_diff.mul(user_tokens_per_minute));
         }
@@ -111,8 +111,8 @@ impl InDance {
 
         if last_claimed_time.gt(&U256::ZERO) {
             let user_tokens_per_minute = self.tokens_per_minute.get(user);
-            let time_diff = (U256::from(block::timestamp()).checked_sub(last_claimed_time))
-                .ok_or("EBT")?;
+            let time_diff =
+                (U256::from(block::timestamp()).checked_sub(last_claimed_time)).ok_or("EBT")?;
 
             claim_pending.add_assign(time_diff.mul(user_tokens_per_minute));
         }
@@ -154,12 +154,15 @@ impl InDance {
             .ok_or("OVF")?;
 
         // Receveing tokens from user
-        self.erc20
-            .burn(msg::sender(), price)
-            .err()
-            .ok_or("NEB1")?;
+        self.erc20.burn(msg::sender(), price).err().ok_or("NEB1")?;
 
-        let last_floor_id = self.last_floor_ids.get(msg::sender());
+        let floors_num = self.floors_num.get(msg::sender());
+
+        if floors_num.eq(&U256::ZERO) {
+            return Err("NOFL".into());
+        }
+
+        let last_floor_id = floors_num.sub(U256::from(1));
 
         let mut last_dancer_id = 0;
         for i in 0..9 {
@@ -185,9 +188,7 @@ impl InDance {
         }
 
         let mut user_floors_setter = (self.floors).setter(msg::sender());
-        let mut last_floor = user_floors_setter
-            .get_mut(last_floor_id)
-            .ok_or("NLF")?;
+        let mut last_floor = user_floors_setter.get_mut(last_floor_id).ok_or("NLF")?;
 
         let old_floor_tokens_per_minute = last_floor.base_tokens_per_minute.get();
         let coins_per_minute_delta = U256::from(coins_per_minute)
@@ -207,10 +208,7 @@ impl InDance {
             .setter(msg::sender())
             .set(current_user_tokens_per_minute.add(coins_per_minute_delta));
 
-        let mut dancer_setter = last_floor
-            .dancers
-            .setter(last_dancer_id)
-            .ok_or("NOST")?;
+        let mut dancer_setter = last_floor.dancers.setter(last_dancer_id).ok_or("NOST")?;
 
         dancer_setter.level.set(U256::from(level));
         dancer_setter.params.set(U256::from(1));
@@ -219,51 +217,48 @@ impl InDance {
     }
 
     pub fn buy_floor(&mut self) -> Result<(), Vec<u8>> {
-        let last_floor_id = self.last_floor_ids.get(msg::sender());
+        let floors_num = self.floors_num.get(msg::sender());
 
-        if last_floor_id.gt(&U256::ZERO) {
+        if floors_num.gt(&U256::ZERO) {
             let price = U256::from(FLOOR_PRICE)
                 .checked_mul(U256::from(10).pow(U256::from(18)))
                 .ok_or("OVF")?;
 
             // Receveing tokens from user
-            self.erc20
-                .burn(msg::sender(), price)
-                .err()
-                .ok_or("NEB")?;
-        }
+            self.erc20.burn(msg::sender(), price).err().ok_or("NEB")?;
 
+            let mut last_dancer_id = 0;
+            let last_floor_id = floors_num.sub(U256::from(1));
 
-        let mut last_dancer_id = 0;
-
-        if last_floor_id.gt(&U256::ZERO) {
-            for i in 0..9 {
-                if self
-                    .floors
-                    .get(msg::sender())
-                    .get(last_floor_id)
-                    .ok_or("Err1")?
-                    .dancers
-                    .get(i)
-                    .ok_or("Err2")?
-                    .level
-                    .gt(&U256::ZERO)
-                {
-                    last_dancer_id += 1;
-                } else {
-                    break;
+            if floors_num.gt(&U256::ZERO) {
+                for i in 0..9 {
+                    if self
+                        .floors
+                        .get(msg::sender())
+                        .get(last_floor_id)
+                        .ok_or("Err1")?
+                        .dancers
+                        .get(i)
+                        .ok_or("Err2")?
+                        .level
+                        .gt(&U256::ZERO)
+                    {
+                        last_dancer_id += 1;
+                    } else {
+                        break;
+                    }
                 }
             }
-        }
-        if last_dancer_id < 9 {
-            // Last floor should be full to buy a new one
-            return Err("NOTF".into());
+            if last_dancer_id < 9 {
+                // Last floor should be full to buy a new one
+                return Err("NOTF".into());
+            }
         }
 
         // Updating last floor id
-        self.last_floor_ids
+        self.floors_num
             .setter(msg::sender())
-            .set(last_floor_id.add(U256::from(1)));
+            .set(floors_num.add(U256::from(1)));
 
         self.floors.setter(msg::sender()).grow();
 
