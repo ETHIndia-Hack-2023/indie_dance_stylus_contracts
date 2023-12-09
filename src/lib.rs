@@ -14,7 +14,7 @@ use crate::erc20::{Erc20, Erc20Params};
 use alloy_primitives::address;
 /// Import the Stylus SDK along with alloy primitive types for use in our program.
 use stylus_sdk::{
-    alloy_primitives::Address, alloy_primitives::U256, block, call::RawCall, contract,
+    alloy_primitives::Address, alloy_primitives::U256, block,
     function_selector, msg, prelude::*,
 };
 
@@ -102,6 +102,27 @@ impl InDance {
 #[external]
 #[inherit(Erc20<InDanceParams>)]
 impl InDance {
+    pub fn get_game_data(&self, user: Address) -> Result<[(U256, U256); 10], Vec<u8>>{
+        let mut result: [(U256, U256); 10] = [(U256::ZERO, U256::ZERO); 10];
+
+        let last_floor_id = self.floors_num.get(msg::sender()).checked_sub(U256::from(1)).ok_or("NOFL")?;
+
+        let last_floor = self.get_dance_floor(user, last_floor_id).ok().ok_or("NGLF")?;
+
+        for i in 0..9 {
+            result[i] = last_floor[i];
+        }
+
+        let balance = self.erc20.balance_of(user).ok().ok_or("NB")?;
+        let claimable = self.get_claimable(user).ok().ok_or("NC")?;
+
+        let user_tokens_per_minute = self.tokens_per_minute.get(msg::sender());
+
+        result[9] = (balance.add(claimable), user_tokens_per_minute);
+
+        return Ok(result);
+    }
+
     pub fn get_claimable(&self, user: Address) -> Result<U256, Vec<u8>> {
         let claim = self.claims.get(user);
         let last_claimed_time = self.last_claimed.get(user);
