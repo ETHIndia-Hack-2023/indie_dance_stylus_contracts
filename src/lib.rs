@@ -75,14 +75,13 @@ impl InDance {
         if last_claimed_time.eq(&U256::ZERO) {
             return Ok(U256::ZERO);
         }
-        {
-            let user_tokens_per_minute = self.tokens_per_minute.get(user);
-            let time_diff =
-                (U256::from(block::timestamp()).checked_sub(last_claimed_time)).ok_or("IBT1")?;
+        
+        let user_tokens_per_minute = self.tokens_per_minute.get(user);
+        let time_diff =
+            (U256::from(block::timestamp()).checked_sub(last_claimed_time)).ok_or("IBT1")?;
 
-            claim_pending.add_assign(time_diff.mul(user_tokens_per_minute));
-        }
-
+        claim_pending.add_assign(time_diff.mul(user_tokens_per_minute));
+    
         if claim_pending.eq(&U256::ZERO) {
             return Err("NTC1".into());
         }
@@ -157,8 +156,14 @@ impl InDance {
             .checked_mul(U256::from(10).pow(U256::from(18)))
             .ok_or("OVF")?;
 
+        let balance = self.erc20.balance_of(msg::sender()).ok().ok_or("BLE")?;
+
+        if balance.lt(&price) {
+            return Err("NOMO".into());
+        }
+
         // Receveing tokens from user
-        self.erc20.burn(msg::sender(), price).err().ok_or("NEB1")?;
+        self.erc20.burn(msg::sender(), price).ok().ok_or("NEB1")?;
 
         let floors_num = self.floors_num.get(msg::sender());
 
@@ -215,7 +220,7 @@ impl InDance {
         let mut dancer_setter = last_floor.dancers.setter(last_dancer_id).ok_or("NOST")?;
 
         dancer_setter.level.set(U256::from(level));
-        dancer_setter.params.set(U256::from(1));
+        dancer_setter.params.set(U256::from(block::timestamp()));
 
         return Ok(());
     }
@@ -223,36 +228,42 @@ impl InDance {
     pub fn buy_floor(&mut self) -> Result<(), Vec<u8>> {
         let floors_num = self.floors_num.get(msg::sender());
 
+        // Only first floor is free
         if floors_num.gt(&U256::ZERO) {
             let price = U256::from(FLOOR_PRICE)
                 .checked_mul(U256::from(10).pow(U256::from(18)))
                 .ok_or("OVF")?;
 
+            let balance = self.erc20.balance_of(msg::sender()).ok().ok_or("BLE")?;
+
+            if balance.lt(&price) {
+                return Err("NOMO".into());
+            }
+    
             // Receveing tokens from user
             self.erc20.burn(msg::sender(), price).err().ok_or("NEB")?;
 
             let mut last_dancer_id = 0;
             let last_floor_id = floors_num.sub(U256::from(1));
 
-            if floors_num.gt(&U256::ZERO) {
-                for i in 0..9 {
-                    if self
-                        .floors
-                        .get(msg::sender())
-                        .get(last_floor_id)
-                        .ok_or("Err1")?
-                        .dancers
-                        .get(i)
-                        .ok_or("Err2")?
-                        .level
-                        .gt(&U256::ZERO)
-                    {
-                        last_dancer_id += 1;
-                    } else {
-                        break;
-                    }
+            for i in 0..9 {
+                if self
+                    .floors
+                    .get(msg::sender())
+                    .get(last_floor_id)
+                    .ok_or("Err1")?
+                    .dancers
+                    .get(i)
+                    .ok_or("Err2")?
+                    .level
+                    .gt(&U256::ZERO)
+                {
+                    last_dancer_id += 1;
+                } else {
+                    break;
                 }
             }
+            
             if last_dancer_id < 9 {
                 // Last floor should be full to buy a new one
                 return Err("NOTF".into());
