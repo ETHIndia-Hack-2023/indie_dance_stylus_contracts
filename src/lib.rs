@@ -15,7 +15,7 @@ use alloy_primitives::address;
 /// Import the Stylus SDK along with alloy primitive types for use in our program.
 use stylus_sdk::{
     alloy_primitives::Address, alloy_primitives::U256, block,
-    function_selector, msg, prelude::*,
+    function_selector, msg, prelude::*, contract,
 };
 
 const OWNER: Address = address!("05221C4fF9FF91F04cb10F46267f492a94571Fa9");
@@ -50,7 +50,7 @@ sol_storage! {
 
     pub struct DanceFloor {
         Dancer[9] dancers;
-        uint256 base_tokens_per_minute;
+        uint256 base_tokens_per_second;
     }
 
     #[entrypoint]
@@ -58,8 +58,7 @@ sol_storage! {
         mapping(address => DanceFloor[]) floors;
         mapping(address => uint256) floors_num;
         mapping(address => uint256) last_claimed;
-        mapping(address => uint256) claims;
-        mapping(address => uint256) tokens_per_minute;
+        mapping(address => uint256) tokens_per_second;
         #[borrow] // Allows erc20 to access Weth's storage and make calls
         Erc20<InDanceParams> erc20;
 
@@ -68,8 +67,13 @@ sol_storage! {
 
 impl InDance {
     fn _claim(&mut self, user: Address) -> Result<U256, Vec<u8>> {
-        let claim = self.claims.get(msg::sender());
         let last_claimed_time = self.last_claimed.get(user);
+
+        // Update last claim time
+        self.last_claimed
+        .setter(user)
+        .set(U256::from(block::timestamp()));
+    
 
         let mut claim_pending = U256::ZERO;
 
@@ -77,26 +81,19 @@ impl InDance {
             return Ok(U256::ZERO);
         }
         
-        let user_tokens_per_minute = self.tokens_per_minute.get(user);
+        let user_tokens_per_second = self.tokens_per_second.get(user);
         let time_diff =
             (U256::from(block::timestamp()).checked_sub(last_claimed_time)).ok_or("IBT1")?;
 
-        claim_pending.add_assign(time_diff.mul(user_tokens_per_minute));
+        claim_pending.add_assign(time_diff.mul(user_tokens_per_second));
     
         if claim_pending.eq(&U256::ZERO) {
-            return Err("NTC1".into());
+            return Ok(U256::ZERO);
         }
 
-        // Update last claim time
-        self.last_claimed
-            .setter(user)
-            .set(U256::from(block::timestamp()));
+        self.erc20.mint(user, claim_pending);
 
-        let total_claim = claim.add(claim_pending);
-
-        self.erc20.mint(user, total_claim);
-
-        Ok(total_claim)
+        Ok(claim_pending)
     }
 }
 
@@ -117,28 +114,27 @@ impl InDance {
         let balance = self.erc20.balance_of(user).ok().ok_or("NB")?;
         let claimable = self.get_claimable(user).ok().ok_or("NC")?;
 
-        let user_tokens_per_minute = self.tokens_per_minute.get(user);
+        let user_tokens_per_second = self.tokens_per_second.get(user);
 
-        result[9] = (balance.add(claimable), user_tokens_per_minute);
+        result[9] = (balance.add(claimable), user_tokens_per_second);
 
         return Ok(result);
     }
 
     pub fn get_claimable(&self, user: Address) -> Result<U256, Vec<u8>> {
-        let claim = self.claims.get(user);
         let last_claimed_time = self.last_claimed.get(user);
 
         let mut claim_pending = U256::ZERO;
 
         if last_claimed_time.gt(&U256::ZERO) {
-            let user_tokens_per_minute = self.tokens_per_minute.get(user);
+            let user_tokens_per_second = self.tokens_per_second.get(user);
             let time_diff =
                 (U256::from(block::timestamp()).checked_sub(last_claimed_time)).ok_or("EBT")?;
 
-            claim_pending.add_assign(time_diff.mul(user_tokens_per_minute));
+            claim_pending.add_assign(time_diff.mul(user_tokens_per_second));
         }
 
-        Ok(claim.add(claim_pending))
+        Ok(claim_pending)
     }
     pub fn claim(&mut self) -> Result<U256, Vec<u8>> {
         return self._claim(msg::sender());
@@ -221,23 +217,23 @@ impl InDance {
         let mut user_floors_setter = (self.floors).setter(msg::sender());
         let mut last_floor = user_floors_setter.get_mut(last_floor_id).ok_or("NLF")?;
 
-        let old_floor_tokens_per_minute = last_floor.base_tokens_per_minute.get();
+        let old_floor_tokens_per_second = last_floor.base_tokens_per_second.get();
         let coins_per_minute_delta = U256::from(coins_per_minute)
             .checked_mul(U256::from(10).pow(U256::from(18)))
             .ok_or("OVF")?;
 
-        last_floor.base_tokens_per_minute.set(
+        last_floor.base_tokens_per_second.set(
             coins_per_minute_delta
-                .add(old_floor_tokens_per_minute)
+                .add(old_floor_tokens_per_second)
                 .clone(),
         );
 
-        let current_user_tokens_per_minute = self.tokens_per_minute.get(msg::sender());
+        let current_user_tokens_per_second = self.tokens_per_second.get(msg::sender());
 
         // Incrementing user tokens per minute
-        self.tokens_per_minute
+        self.tokens_per_second
             .setter(msg::sender())
-            .set(current_user_tokens_per_minute.add(coins_per_minute_delta));
+            .set(current_user_tokens_per_second.add(coins_per_minute_delta));
 
         let mut dancer_setter = last_floor.dancers.setter(last_dancer_id).ok_or("NOST")?;
 
